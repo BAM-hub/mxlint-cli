@@ -8,9 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gopkg.in/yaml.v3"
-
 	_ "github.com/glebarez/go-sqlite"
+	"github.com/mxlint/mxlint-cli/cache"
+	"github.com/mxlint/mxlint-cli/shared"
+	"gopkg.in/yaml.v3"
 )
 
 func ExportModel(inputDirectory string, outputDirectory string, raw bool, mode string, appstore bool) error {
@@ -26,7 +27,7 @@ func ExportModel(inputDirectory string, outputDirectory string, raw bool, mode s
 	log.Infof("Exporting to %s", tmpDir)
 
 	// Check if we can find an MPR file
-	mprPath, err := getMprPath(inputDirectory)
+	mprPath, err := GetMprPath(inputDirectory)
 	if err != nil {
 		return fmt.Errorf("error finding MPR file: %v", err)
 	}
@@ -42,11 +43,11 @@ func ExportModel(inputDirectory string, outputDirectory string, raw bool, mode s
 
 	modules := getMxModules(units)
 
-	if err := exportMetadata(inputDirectory, tmpDir, modules); err != nil {
+	if err := exportMetadata(inputDirectory, outputDirectory, modules); err != nil {
 		return fmt.Errorf("error exporting metadata: %v", err)
 	}
 
-	if err := exportUnits(inputDirectory, tmpDir, raw, mode); err != nil {
+	if err := exportUnits(inputDirectory, outputDirectory, raw, mode); err != nil {
 		return fmt.Errorf("error exporting units: %v", err)
 	}
 
@@ -58,7 +59,7 @@ func ExportModel(inputDirectory string, outputDirectory string, raw bool, mode s
 	}
 
 	// Ensure both source and destination directories exist before syncing
-	if _, err := os.Stat(tmpDir); os.IsNotExist(err) {
+	if _, err := os.Stat(outputDirectory); os.IsNotExist(err) {
 		return fmt.Errorf("source directory does not exist: %v", err)
 	}
 
@@ -67,10 +68,10 @@ func ExportModel(inputDirectory string, outputDirectory string, raw bool, mode s
 	}
 
 	// copy tmp directory to output directory
-	err = syncDirectories(tmpDir, outputDirectory)
-	if err != nil {
-		return fmt.Errorf("error moving tmp directory to output directory: %v", err)
-	}
+	// err = syncDirectories(outputDirectory, outputDirectory)
+	// if err != nil {
+	// 	return fmt.Errorf("error moving tmp directory to output directory: %v", err)
+	// }
 
 	if !appstore {
 		// remove appstore modules
@@ -114,7 +115,7 @@ func getMprVersion(MPRFilePath string) (int, error) {
 
 func exportMetadata(inputDirectory string, outputDirectory string, modules []MxModule) error {
 
-	mprPath, err := getMprPath(inputDirectory)
+	mprPath, err := GetMprPath(inputDirectory)
 	if err != nil {
 		return err
 	}
@@ -254,9 +255,10 @@ func getMxDocumentPath(containerID string, folders []MxFolder) string {
 	return ""
 }
 
-func getMxDocuments(units []MxUnit, folders []MxFolder, mode string) ([]MxDocument, error) {
-	var documents []MxDocument
+func getMxDocuments(units []MxUnit, folders []MxFolder, mode string) ([]shared.MxDocument, MxCacheDiffMap, error) {
+	var documents []shared.MxDocument
 	documentTypes := []string{"ProjectDocuments", "DomainModel", "ModuleSettings", "ModuleSecurity", "Documents"}
+	mxFileCache := make(MxCacheDiffMap)
 
 	for _, unit := range units {
 		if Contains(documentTypes, unit.ContainmentName) {
@@ -266,11 +268,16 @@ func getMxDocuments(units []MxUnit, folders []MxFolder, mode string) ([]MxDocume
 				name = unit.Contents["Name"].(string)
 			}
 
-			myDocument := MxDocument{
+			myDocument := shared.MxDocument{
 				Name:       name,
 				Type:       unit.Contents["$Type"].(string),
 				Path:       getMxDocumentPath(unit.ContainerID, folders),
 				Attributes: unit.Contents,
+				Hash:       unit.Hash,
+				Id:         unit.UnitID,
+			}
+			mxFileCache[myDocument.Path] = MxCacheDiff{
+				ID: myDocument.Id,
 			}
 
 			if mode == "advanced" && unit.Contents["$Type"] == "Microflows$Microflow" {
@@ -280,7 +287,7 @@ func getMxDocuments(units []MxUnit, folders []MxFolder, mode string) ([]MxDocume
 		}
 	}
 	log.Infof("Found %d documents", len(documents))
-	return documents, nil
+	return documents, mxFileCache, nil
 }
 
 func exportUnits(inputDirectory string, outputDirectory string, raw bool, mode string) error {
@@ -291,14 +298,22 @@ func exportUnits(inputDirectory string, outputDirectory string, raw bool, mode s
 		log.Errorf("Error getting units: %v", err)
 		return fmt.Errorf("error getting units: %v", err)
 	}
+	fmt.Println("calling export")
+
+	if err != nil {
+		return fmt.Errorf("error exporting metadata: %v", err)
+	}
+
 	folders, err := getMxFolders(units)
 	if err != nil {
 		return fmt.Errorf("error getting folders: %v", err)
 	}
-	documents, err := getMxDocuments(units, folders, mode)
+	documents, _, err := getMxDocuments(units, folders, mode)
 	if err != nil {
 		return fmt.Errorf("error getting documents: %v", err)
 	}
+
+	commit, diffedFiles, fileList, err := cache.ExporApptMeta(inputDirectory, outputDirectory, documents)
 
 	for _, document := range documents {
 		// write document
@@ -313,14 +328,34 @@ func exportUnits(inputDirectory string, outputDirectory string, raw bool, mode s
 		if document.Name == "" {
 			fname = fmt.Sprintf("%s.yaml", document.Type)
 		}
+
 		attributes := cleanData(document.Attributes, raw)
-		err = writeFile(filepath.Join(directory, fname), attributes)
+		attributes["Hash"] = document.Hash
+		attributes["Id"] = document.Id
+
+		relPath := strings.Replace(filepath.Join(directory, fname), outputDirectory, "", -1)
+
+		// this is pure evil and a workaround this should be refactored
+		fileList[document.Id] = cache.MxFileMeta{Path: relPath, Hash: document.Hash}
+
+		if _, ok := diffedFiles[document.Id]; !ok {
+			err = writeFile(filepath.Join(directory, fname), attributes)
+		} else {
+			diffedFiles[document.Id] = cache.MxFileMeta{Path: relPath, Hash: document.Hash}
+			fmt.Println("File was found in cache will not recreate")
+		}
+
 		if err != nil {
 			log.Errorf("Error writing file: %v", err)
 			return err
 		}
 	}
 
+	if commit != nil {
+		if err := commit(fileList); err != nil {
+			return fmt.Errorf("error committing metadata: %v", err)
+		}
+	}
 	return nil
 
 }
@@ -339,7 +374,7 @@ func writeFile(filepath string, contents map[string]interface{}) error {
 }
 
 func getMxUnits(inputDirectory string) ([]MxUnit, error) {
-	mprPath, err := getMprPath(inputDirectory)
+	mprPath, err := GetMprPath(inputDirectory)
 	if err != nil {
 		log.Errorf("Error getting MPR path: %v", err)
 		return nil, err

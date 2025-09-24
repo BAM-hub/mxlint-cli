@@ -15,15 +15,14 @@ import (
 
 func readMxUnitsV1(inputDirectory string) ([]MxUnit, error) {
 
-	mprPath, err := getMprPath(inputDirectory)
+	mprPath, err := GetMprPath(inputDirectory)
 	if err != nil {
 		return nil, err
 	}
 	return getMxUnitsV1(mprPath)
 
 }
-
-func getMprPath(inputDirectory string) (string, error) {
+func GetMprPath(inputDirectory string) (string, error) {
 	var mprPath string
 	found := false
 
@@ -61,7 +60,7 @@ func getMxUnitsV1(MPRFilePath string) ([]MxUnit, error) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query("SELECT UnitID, ContainerID, ContainmentName, Contents FROM Unit")
+	rows, err := db.Query("SELECT UnitID, ContainerID, ContentsHash, ContainmentName, Contents FROM Unit")
 	if err != nil {
 		return nil, fmt.Errorf("error querying units: %v", err)
 	}
@@ -72,7 +71,8 @@ func getMxUnitsV1(MPRFilePath string) ([]MxUnit, error) {
 	for rows.Next() {
 		var containmentName string
 		var unitID, containerID, contents []byte
-		if err := rows.Scan(&unitID, &containerID, &containmentName, &contents); err != nil {
+		var contentsHash string
+		if err := rows.Scan(&unitID, &containerID, &contentsHash, &containmentName, &contents); err != nil {
 			return nil, fmt.Errorf("error scanning unit: %v", err)
 		}
 
@@ -89,6 +89,7 @@ func getMxUnitsV1(MPRFilePath string) ([]MxUnit, error) {
 			ContainerID:     base64.StdEncoding.EncodeToString(containerID),
 			ContainmentName: containmentName,
 			Contents:        result,
+			Hash:            contentsHash,
 		}
 
 		units = append(units, myUnit)

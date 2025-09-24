@@ -10,15 +10,24 @@ type MxUnit struct {
 	UnitID          string                 `yaml:"UnitID"`
 	ContainerID     string                 `yaml:"ContainerID"`
 	ContainmentName string                 `yaml:"ContainmentName"`
+	Hash            string                 `yaml:"Hash"`
 	Contents        map[string]interface{} `yaml:"Contents"`
 }
 
-type MxDocument struct {
-	Name       string                 `yaml:"Name"`
-	Type       string                 `yaml:"Type"`
-	Path       string                 `yaml:"Path"`
-	Attributes map[string]interface{} `yaml:"Attributes"`
+type MxFileMeta struct {
+	Hash     string `yaml:"Hash"`
+	Path     string `yaml:"Path"`
+	diffType string `yaml:"DiffType"`
 }
+
+type MxCacheDiff struct {
+	ID       string `yaml:"ID"`
+	diffType string `yaml:"DiffType"`
+}
+
+type MxCacheDiffMap map[string]MxCacheDiff
+
+type MxFileListMeta map[string]MxFileMeta
 
 type MxModule struct {
 	Name       string                 `yaml:"Name"`
