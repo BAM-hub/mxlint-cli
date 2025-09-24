@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/mxlint/mxlint-cli/cache"
 )
 
 const NOQA = "# noqa"
@@ -32,12 +34,14 @@ func printTestsuite(ts Testsuite) {
 func EvalAllWithResults(rulesPath string, modelSourcePath string, xunitReport string, jsonFile string) (interface{}, error) {
 	testsuites := make([]Testsuite, 0)
 	rules, err := ReadRulesMetadata(rulesPath)
+	mxCache, err := cache.GetDiffCache(modelSourcePath)
+
 	if err != nil {
 		return nil, err
 	}
 	failuresCount := 0
 	for _, rule := range rules {
-		testsuite, err := evalTestsuite(rule, modelSourcePath)
+		testsuite, err := evalTestsuite(rule, modelSourcePath, mxCache)
 		if err != nil {
 			return nil, err
 		}
@@ -106,9 +110,16 @@ func EvalAll(rulesPath string, modelSourcePath string, xunitReport string, jsonF
 	if err != nil {
 		return err
 	}
+
+	mxCache, err := cache.GetDiffCache(modelSourcePath)
+
+	if err != nil {
+		return err
+	}
+
 	failuresCount := 0
 	for _, rule := range rules {
-		testsuite, err := evalTestsuite(rule, modelSourcePath)
+		testsuite, err := evalTestsuite(rule, modelSourcePath, mxCache)
 		if err != nil {
 			return err
 		}
@@ -133,15 +144,57 @@ func EvalAll(rulesPath string, modelSourcePath string, xunitReport string, jsonF
 	}
 
 	if jsonFile != "" {
-		file, err := os.Create(jsonFile)
+		file, err := os.ReadFile(jsonFile)
+		if os.IsNotExist(err) {
+			// new file creation
+			newFile, err := os.Create(jsonFile)
+
+			if err != nil {
+				panic(err)
+			}
+			defer newFile.Close()
+
+			encoder := json.NewEncoder(newFile)
+			encoder.SetIndent("", "  ")
+			testsuitesContainer := TestSuites{Testsuites: testsuites, Rules: rules}
+			if err := encoder.Encode(testsuitesContainer); err != nil {
+				panic(err)
+			}
+		}
+
+		var jsonData TestSuites
+		err = json.Unmarshal(file, &jsonData)
+
+		if err != nil {
+			return fmt.Errorf("%v", err)
+		}
+
+		for index, testsuite := range jsonData.Testsuites {
+			// if the new data has tests this meas this was diffed in cache
+			if testsuite.Tests > 0 {
+				for _, testCase := range testsuite.Testcases {
+					var newResultIndex = findTestCase(testsuites[index].Testcases, testCase.Name)
+					fmt.Println(newResultIndex)
+					if newResultIndex != -1 {
+						jsonData.Testsuites[index].Testcases[newResultIndex] = testsuites[index].Testcases[newResultIndex]
+						fmt.Println(testCase, testsuites[index].Testcases[newResultIndex])
+					}
+
+				}
+
+			}
+
+		}
+		newFile, err := os.Create(jsonFile)
+
 		if err != nil {
 			panic(err)
 		}
-		defer file.Close()
+		defer newFile.Close()
 
-		encoder := json.NewEncoder(file)
+		encoder := json.NewEncoder(newFile)
 		encoder.SetIndent("", "  ")
-		testsuitesContainer := TestSuites{Testsuites: testsuites, Rules: rules}
+		testsuitesContainer := TestSuites{Testsuites: jsonData.Testsuites, Rules: rules}
 		if err := encoder.Encode(testsuitesContainer); err != nil {
 			panic(err)
 		}
@@ -172,7 +225,18 @@ func EvalAll(rulesPath string, modelSourcePath string, xunitReport string, jsonF
 		log.Infof("Total rules evaluated: %d", len(rules))
 		log.Infof("Total files checked: %d", countTotalTestcases(testsuites))
 	}
+
+	// cache.InvalidateCahce(modelSourcePath)
 	return nil
+}
+
+func findTestCase(slice []Testcase, value string) int {
+	for index, item := range slice {
+		if item.Name == value {
+			return index
+		}
+	}
+	return -1
 }
 
 // countTotalTestcases returns the total number of testcases across all testsuites
@@ -184,7 +248,7 @@ func countTotalTestcases(testsuites []Testsuite) int {
 	return count
 }
 
-func evalTestsuite(rule Rule, modelSourcePath string) (*Testsuite, error) {
+func evalTestsuite(rule Rule, modelSourcePath string, changedFiles cache.MxCacheDiffMap) (*Testsuite, error) {
 
 	log.Debugf("evaluating rule %s", rule.Path)
 
@@ -193,14 +257,14 @@ func evalTestsuite(rule Rule, modelSourcePath string) (*Testsuite, error) {
 	failuresCount := 0
 	skippedCount := 0
 	totalTime := 0.0
-	inputFiles, err := expandPaths(rule.Pattern, modelSourcePath)
+	inputFiles, err := expandPaths(rule.Pattern, modelSourcePath, changedFiles)
 	if err != nil {
 		return nil, err
 	}
+
 	testcase := &Testcase{}
 
 	for _, inputFile := range inputFiles {
-
 		if rule.Language == LanguageRego {
 			testcase, err = evalTestcase_Rego(rule.Path, queryString, inputFile)
 		} else if rule.Language == LanguageJavascript {

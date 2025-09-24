@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/mxlint/mxlint-cli/cache"
 	"github.com/sirupsen/logrus"
 )
 
@@ -16,8 +17,9 @@ func SetLogger(logger *logrus.Logger) {
 	log = logger
 }
 
-func expandPaths(pattern string, workingDirectory string) ([]string, error) {
+func expandPaths(pattern string, workingDirectory string, changedFiles cache.MxCacheDiffMap) ([]string, error) {
 	// backwards compatible with old filepath.glob(...)
+	// cache.GetCahce()
 	if !strings.HasPrefix(pattern, ".*") {
 		oldPattern := pattern
 		pattern = strings.ReplaceAll(pattern, "$", "\\$")
@@ -28,6 +30,7 @@ func expandPaths(pattern string, workingDirectory string) ([]string, error) {
 	// First get all files recursively under working directory
 	var matches []string
 	err := filepath.Walk(workingDirectory, func(path string, info os.FileInfo, err error) error {
+
 		if err != nil {
 			return err
 		}
@@ -37,6 +40,7 @@ func expandPaths(pattern string, workingDirectory string) ([]string, error) {
 		}
 		// Get relative path from working directory
 		relPath, err := filepath.Rel(workingDirectory, path)
+
 		if err != nil {
 			return err
 		}
@@ -47,8 +51,11 @@ func expandPaths(pattern string, workingDirectory string) ([]string, error) {
 			return err
 		}
 		if matched {
-			matches = append(matches, path)
+			if _, ok := changedFiles[relPath]; ok {
+				matches = append(matches, path)
+			}
 		}
+
 		return nil
 	})
 	if err != nil {
