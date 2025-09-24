@@ -1,6 +1,8 @@
 package mpr
 
-func transformMicroflow(mf MxDocument) MxDocument {
+import "github.com/mxlint/mxlint-cli/shared"
+
+func transformMicroflow(mf shared.MxDocument) shared.MxDocument {
 	// Transform a microflow
 	log.Infof("Transforming microflow %s", mf.Name)
 

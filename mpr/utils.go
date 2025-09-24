@@ -44,7 +44,7 @@ func ignoreAttributes(data bson.M, ignore []string) bson.M {
 		if !ignoreKey {
 			if reflect.TypeOf(value) == reflect.TypeOf(primitive.A{}) {
 				castedData := value.(primitive.A)
-				var interfaceSlice []interface{} = castedData
+				var interfaceSlice []any = castedData
 				if len(interfaceSlice) > 0 {
 					if reflect.TypeOf(interfaceSlice[0]) == reflect.TypeOf(int32(1)) {
 						value = interfaceSlice[1:]
@@ -59,12 +59,12 @@ func ignoreAttributes(data bson.M, ignore []string) bson.M {
 			switch v := value.(type) {
 			case bson.M:
 				result[key] = ignoreAttributes(v, ignore)
-			case []interface{}:
-				var slice []interface{}
+			case []any:
+				var slice []any
 				for _, item := range v {
 					switch item := item.(type) {
-					case []map[string]interface{}:
-						var slice2 []map[string]interface{}
+					case []map[string]any:
+						var slice2 []map[string]any
 						for _, item2 := range item {
 							slice2 = append(slice2, ignoreAttributes(item2, ignore))
 						}
@@ -76,13 +76,13 @@ func ignoreAttributes(data bson.M, ignore []string) bson.M {
 					}
 				}
 				result[key] = slice
-			case []map[string]interface{}:
-				var slice []map[string]interface{}
+			case []map[string]any:
+				var slice []map[string]any
 				for _, item := range v {
 					slice = append(slice, ignoreAttributes(item, ignore))
 				}
 				result[key] = slice
-			case map[string]interface{}:
+			case map[string]any:
 				result[key] = ignoreAttributes(v, ignore)
 			default:
 				result[key] = value

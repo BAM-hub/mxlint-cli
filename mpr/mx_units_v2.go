@@ -14,7 +14,7 @@ import (
 )
 
 func readMxUnitsV2(inputDirectory string) ([]MxUnit, error) {
-	mprPath, err := getMprPath(inputDirectory)
+	mprPath, err := GetMprPath(inputDirectory)
 	if err != nil {
 		return nil, fmt.Errorf("error getting MPR path: %v", err)
 	}
