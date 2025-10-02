@@ -145,7 +145,8 @@ func EvalAll(rulesPath string, modelSourcePath string, xunitReport string, jsonF
 
 	if jsonFile != "" {
 		file, err := os.ReadFile(jsonFile)
-		if os.IsNotExist(err) {
+
+		if os.IsNotExist(err) || len(file) == 0 {
 			// new file creation
 			newFile, err := os.Create(jsonFile)
 
@@ -169,15 +170,53 @@ func EvalAll(rulesPath string, modelSourcePath string, xunitReport string, jsonF
 			return fmt.Errorf("%v", err)
 		}
 
-		for index, testsuite := range jsonData.Testsuites {
+		for index, testsuite := range testsuites {
 			// if the new data has tests this meas this was diffed in cache
+
 			if testsuite.Tests > 0 {
 				for _, testCase := range testsuite.Testcases {
-					var newResultIndex = findTestCase(testsuites[index].Testcases, testCase.Name)
-					fmt.Println(newResultIndex)
-					if newResultIndex != -1 {
-						jsonData.Testsuites[index].Testcases[newResultIndex] = testsuites[index].Testcases[newResultIndex]
-						fmt.Println(testCase, testsuites[index].Testcases[newResultIndex])
+					testCaseIndex := findTestCase(jsonData.Testsuites[index].Testcases, testCase.Name)
+					if testCaseIndex != -1 {
+
+						oldTestSuite := jsonData.Testsuites[index]
+						oldTestCase := jsonData.Testsuites[index].Testcases[testCaseIndex]
+
+						if testCase.IsDeleted {
+							// just remove it and keep going
+							oldTestSuite.Time -= testCase.Time
+							length := len(oldTestSuite.Testcases) - 1
+							oldTestSuite.Testcases[testCaseIndex] = oldTestSuite.Testcases[length]
+							oldTestSuite.Testcases = oldTestSuite.Testcases[:length]
+							jsonData.Testsuites[index] = oldTestSuite
+							continue
+						}
+
+						// remove the old faliure
+						if oldTestCase.Failure != nil {
+							oldTestSuite.Failures--
+						}
+
+						// add the new faliure if exists
+						if testCase.Failure != nil {
+							oldTestSuite.Failures++
+						}
+
+						oldTestSuite.Time -= oldTestCase.Time
+						oldTestSuite.Time += testCase.Time
+
+						jsonData.Testsuites[index].Testcases[testCaseIndex] = testCase
+						jsonData.Testsuites[index] = oldTestSuite
+						break
+					} else {
+						oldTestSuite := jsonData.Testsuites[index]
+						oldTestSuite.Time += testCase.Time
+
+						if testCase.Failure != nil {
+							oldTestSuite.Failures++
+						}
+
+						jsonData.Testsuites[index] = oldTestSuite
+						jsonData.Testsuites[index].Testcases = append(jsonData.Testsuites[index].Testcases, testCase)
 					}
 
 				}
@@ -185,6 +224,7 @@ func EvalAll(rulesPath string, modelSourcePath string, xunitReport string, jsonF
 			}
 
 		}
+		cache.InvalidateCahce(modelSourcePath, false)
 		newFile, err := os.Create(jsonFile)
 
 		if err != nil {
@@ -231,6 +271,7 @@ func EvalAll(rulesPath string, modelSourcePath string, xunitReport string, jsonF
 }
 
 func findTestCase(slice []Testcase, value string) int {
+
 	for index, item := range slice {
 		if item.Name == value {
 			return index
@@ -248,7 +289,7 @@ func countTotalTestcases(testsuites []Testsuite) int {
 	return count
 }
 
-func evalTestsuite(rule Rule, modelSourcePath string, changedFiles cache.MxCacheDiffMap) (*Testsuite, error) {
+func evalTestsuite(rule Rule, modelSourcePath string, changedFiles cache.MxCacheDiffWrapper) (*Testsuite, error) {
 
 	log.Debugf("evaluating rule %s", rule.Path)
 
@@ -257,7 +298,7 @@ func evalTestsuite(rule Rule, modelSourcePath string, changedFiles cache.MxCache
 	failuresCount := 0
 	skippedCount := 0
 	totalTime := 0.0
-	inputFiles, err := expandPaths(rule.Pattern, modelSourcePath, changedFiles)
+	inputFiles, err := expandPaths(rule.Pattern, modelSourcePath, changedFiles, false)
 	if err != nil {
 		return nil, err
 	}
@@ -265,11 +306,26 @@ func evalTestsuite(rule Rule, modelSourcePath string, changedFiles cache.MxCache
 	testcase := &Testcase{}
 
 	for _, inputFile := range inputFiles {
-		if rule.Language == LanguageRego {
-			testcase, err = evalTestcase_Rego(rule.Path, queryString, inputFile)
-		} else if rule.Language == LanguageJavascript {
-			testcase, err = evalTestcase_Javascript(rule.Path, inputFile)
+
+		if inputFile.diffType == "delete" {
+			testcase = &Testcase{
+				Name:      inputFile.path,
+				IsDeleted: true,
+				Time:      0,
+				XMLName:   xml.Name{},
+				Skipped:   nil,
+				Failure:   nil,
+			}
+			testcases = append(testcases, *testcase)
+			continue
 		}
+
+		if rule.Language == LanguageRego {
+			testcase, err = evalTestcase_Rego(rule.Path, queryString, inputFile.path)
+		} else if rule.Language == LanguageJavascript {
+			testcase, err = evalTestcase_Javascript(rule.Path, inputFile.path)
+		}
+
 		if err != nil {
 			return nil, err
 		}
@@ -282,7 +338,6 @@ func evalTestsuite(rule Rule, modelSourcePath string, changedFiles cache.MxCache
 		}
 
 		totalTime += testcase.Time
-
 		testcases = append(testcases, *testcase)
 	}
 
