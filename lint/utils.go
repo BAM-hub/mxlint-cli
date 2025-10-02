@@ -17,9 +17,14 @@ func SetLogger(logger *logrus.Logger) {
 	log = logger
 }
 
-func expandPaths(pattern string, workingDirectory string, changedFiles cache.MxCacheDiffMap) ([]string, error) {
+type ExpandedPath struct {
+	path     string
+	diffType string
+}
+
+func expandPaths(pattern string, workingDirectory string, changedFiles cache.MxCacheDiffWrapper, noCache bool) ([]ExpandedPath, error) {
 	// backwards compatible with old filepath.glob(...)
-	// cache.GetCahce()
+	// cache.GetCache()
 	if !strings.HasPrefix(pattern, ".*") {
 		oldPattern := pattern
 		pattern = strings.ReplaceAll(pattern, "$", "\\$")
@@ -28,7 +33,7 @@ func expandPaths(pattern string, workingDirectory string, changedFiles cache.MxC
 		log.Infof("Expanded old pattern: %v -> %v", oldPattern, pattern)
 	}
 	// First get all files recursively under working directory
-	var matches []string
+	var matches []ExpandedPath
 	err := filepath.Walk(workingDirectory, func(path string, info os.FileInfo, err error) error {
 
 		if err != nil {
@@ -50,9 +55,19 @@ func expandPaths(pattern string, workingDirectory string, changedFiles cache.MxC
 			log.Errorf("Error matching path %v against pattern %v: %v", relPath, pattern, err)
 			return err
 		}
+
 		if matched {
-			if _, ok := changedFiles[relPath]; ok {
-				matches = append(matches, path)
+			fileFromCache, ok := changedFiles.Data[relPath]
+			if changedFiles.Status == "invalid" {
+				matches = append(matches, ExpandedPath{
+					path:     path,
+					diffType: fileFromCache.DiffType,
+				})
+			} else if ok {
+				matches = append(matches, ExpandedPath{
+					path:     path,
+					diffType: fileFromCache.DiffType,
+				})
 			}
 		}
 

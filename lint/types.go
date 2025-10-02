@@ -15,15 +15,16 @@ type Testsuite struct {
 	Failures  int        `xml:"failures,attr" json:"failures"`
 	Skipped   int        `xml:"skipped,attr" json:"skipped"`
 	Time      float64    `xml:"time,attr" json:"time"`
-	Testcases []Testcase `xml:"testcase" json:"testcases"`
+	Testcases []Testcase `xml:"testcases" json:"testcases"`
 }
 
 type Testcase struct {
-	XMLName xml.Name `xml:"testcase" json:"-"`
-	Name    string   `xml:"name,attr" json:"name"`
-	Time    float64  `xml:"time,attr" json:"time"`
-	Failure *Failure `xml:"failure,omitempty" json:"failure,omitempty"`
-	Skipped *Skipped `xml:"skipped,omitempty" json:"skipped,omitempty"`
+	XMLName   xml.Name `xml:"testcase" json:"-"`
+	Name      string   `xml:"name,attr" json:"name"`
+	Time      float64  `xml:"time,attr" json:"time"`
+	Failure   *Failure `xml:"failure,omitempty" json:"failure,omitempty"`
+	Skipped   *Skipped `xml:"skipped,omitempty" json:"skipped,omitempty"`
+	IsDeleted bool     `xml:"isDeleted" json:"isDeleted"`
 }
 
 type Failure struct {
