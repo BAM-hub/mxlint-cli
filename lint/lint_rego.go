@@ -25,7 +25,7 @@ func evalTestcase_Rego(rulePath string, queryString string, inputFilePath string
 	var node yaml.Node
 	err = yaml.Unmarshal(yamlFile, &node)
 	if err != nil {
-		log.Errorf("Error parsing YAML file: %s\n", err)
+		log.Errorf("Error parsing YAML file: %v %s\n", rulePath, inputFilePath, err)
 		return nil, err
 	}
 	err = node.Decode(&data)

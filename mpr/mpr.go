@@ -11,7 +11,7 @@ import (
 	_ "github.com/glebarez/go-sqlite"
 	"github.com/mxlint/mxlint-cli/cache"
 	"github.com/mxlint/mxlint-cli/shared"
-	"gopkg.in/yaml.v3"
+	"sigs.k8s.io/yaml"
 )
 
 func ExportModel(inputDirectory string, outputDirectory string, raw bool, mode string, appstore bool) error {
@@ -298,7 +298,6 @@ func exportUnits(inputDirectory string, outputDirectory string, raw bool, mode s
 		log.Errorf("Error getting units: %v", err)
 		return fmt.Errorf("error getting units: %v", err)
 	}
-	fmt.Println("calling export")
 
 	if err != nil {
 		return fmt.Errorf("error exporting metadata: %v", err)
@@ -335,13 +334,16 @@ func exportUnits(inputDirectory string, outputDirectory string, raw bool, mode s
 
 		relPath := strings.Replace(filepath.Join(directory, fname), outputDirectory, "", -1)
 
-		// this is pure evil and a workaround this should be refactored
-		fileList[document.Id] = cache.MxFileMeta{Path: relPath, Hash: document.Hash}
+		if relPath == "" && fileList[document.Id].Path != "" {
+			relPath = fileList[document.Id].Path
+		}
+
+		fileList[document.Id] = cache.MxFileMeta{Path: relPath, Hash: document.Hash, DiffType: "add"}
 
 		if _, ok := diffedFiles[document.Id]; !ok {
 			err = writeFile(filepath.Join(directory, fname), attributes)
 		} else {
-			diffedFiles[document.Id] = cache.MxFileMeta{Path: relPath, Hash: document.Hash}
+			diffedFiles[document.Id] = cache.MxFileMeta{Path: relPath, Hash: document.Hash, DiffType: diffedFiles[document.Id].DiffType}
 			fmt.Println("File was found in cache will not recreate")
 		}
 
