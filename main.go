@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/mxlint/mxlint-cli/cache"
 	"github.com/mxlint/mxlint-cli/lint"
 	"github.com/mxlint/mxlint-cli/mpr"
 	"github.com/mxlint/mxlint-cli/serve"
@@ -26,6 +27,7 @@ func main() {
 			mode, _ := cmd.Flags().GetString("mode")
 			verbose, _ := cmd.Flags().GetBool("verbose")
 			appstore, _ := cmd.Flags().GetBool("appstore")
+			debug, _ := cmd.Flags().GetBool("debug")
 
 			log := logrus.New()
 			if verbose {
@@ -35,7 +37,7 @@ func main() {
 			}
 
 			mpr.SetLogger(log)
-			mpr.ExportModel(inputDirectory, outputDirectory, raw, mode, appstore)
+			mpr.ExportModel(inputDirectory, outputDirectory, raw, mode, appstore, debug)
 		},
 	}
 
@@ -44,6 +46,7 @@ func main() {
 	cmdExportModel.Flags().StringP("mode", "m", "basic", "Export mode. Valid options: basic, advanced")
 	cmdExportModel.Flags().Bool("raw", false, "If set, the output yaml will include all attributes as they are in the model. Otherwise, only the relevant attributes are included. You should never need this. Only useful when you are developing new functionalities for this tool.")
 	cmdExportModel.Flags().Bool("appstore", false, "If set, appstore modules will be included in the output")
+	cmdExportModel.Flags().Bool("debug", false, "Outoputs meta data in yaml format.")
 	cmdExportModel.Flags().Bool("verbose", false, "Turn on for debug logs")
 	rootCmd.AddCommand(cmdExportModel)
 
@@ -112,6 +115,31 @@ func main() {
 	cmdRules.Flags().StringP("rules", "r", "rules", "Path to directory with rules")
 	cmdRules.Flags().Bool("verbose", false, "Turn on for debug logs")
 	rootCmd.AddCommand(cmdRules)
+
+	var cmdInvalidateCache = &cobra.Command{
+		Use:   "invalidate-cache",
+		Short: "Sets cache state to invalde this makes sure to re-run all test.",
+		Long:  "If the cache state is invalid all tests will run on the target files.",
+		Run: func(cmd *cobra.Command, args []string) {
+			cachePath, _ := cmd.Flags().GetString("cache-path")
+			debug, _ := cmd.Flags().GetBool("debug")
+			log := logrus.New()
+
+			log.SetLevel(logrus.InfoLevel)
+
+			err := cache.InvalidateCahce(cachePath, true, debug)
+
+			if err != nil {
+				log.Errorf("Test rules failed: %s", err)
+				os.Exit(1)
+			}
+		},
+	}
+
+	cmdInvalidateCache.Flags().StringP("cache-path", "c", "cache-path", "path to cache file.")
+	cmdInvalidateCache.Flags().Bool("debug", false, "this dose the same changes to the yaml cache file.")
+
+	rootCmd.AddCommand(cmdInvalidateCache)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
