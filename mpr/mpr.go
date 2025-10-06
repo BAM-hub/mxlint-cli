@@ -14,7 +14,7 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-func ExportModel(inputDirectory string, outputDirectory string, raw bool, mode string, appstore bool) error {
+func ExportModel(inputDirectory string, outputDirectory string, raw bool, mode string, appstore bool, debug bool) error {
 
 	// create tmp directory in user tmp directory
 	tmpDir := filepath.Join(os.TempDir(), "mxlint")
@@ -47,7 +47,7 @@ func ExportModel(inputDirectory string, outputDirectory string, raw bool, mode s
 		return fmt.Errorf("error exporting metadata: %v", err)
 	}
 
-	if err := exportUnits(inputDirectory, outputDirectory, raw, mode); err != nil {
+	if err := exportUnits(inputDirectory, outputDirectory, raw, mode, debug); err != nil {
 		return fmt.Errorf("error exporting units: %v", err)
 	}
 
@@ -290,7 +290,7 @@ func getMxDocuments(units []MxUnit, folders []MxFolder, mode string) ([]shared.M
 	return documents, mxFileCache, nil
 }
 
-func exportUnits(inputDirectory string, outputDirectory string, raw bool, mode string) error {
+func exportUnits(inputDirectory string, outputDirectory string, raw bool, mode string, debug bool) error {
 	log.Debugf("Exporting units from %s to %s", inputDirectory, outputDirectory)
 
 	units, err := getMxUnits(inputDirectory)
@@ -312,7 +312,7 @@ func exportUnits(inputDirectory string, outputDirectory string, raw bool, mode s
 		return fmt.Errorf("error getting documents: %v", err)
 	}
 
-	commit, diffedFiles, fileList, err := cache.ExporApptMeta(inputDirectory, outputDirectory, documents)
+	commit, diffedFiles, fileList, err := cache.ExporApptMeta(inputDirectory, outputDirectory, documents, debug)
 
 	for _, document := range documents {
 		// write document

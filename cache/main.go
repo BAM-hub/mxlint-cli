@@ -3,6 +3,7 @@ package cache
 import (
 	"database/sql"
 	"encoding/base64"
+	"encoding/gob"
 	"fmt"
 	"os"
 	"path"
@@ -45,8 +46,15 @@ func GetMprPath(inputDirectory string) (string, error) {
 	return mprPath, nil
 }
 
-func ExporApptMeta(inputDirectory string, outputDirectory string, documents []shared.MxDocument) (func(data MxFileListMeta) error, MxFileListMeta, MxFileListMeta, error) {
-	var fullOutputPath = filepath.Join(outputDirectory, "cache", "MetaFileList.yaml")
+func ExporApptMeta(inputDirectory string, outputDirectory string, documents []shared.MxDocument, debug bool) (func(data MxFileListMeta) error, MxFileListMeta, MxFileListMeta, error) {
+	var fullOutputPath = filepath.Join(outputDirectory, "cache", "MetaFileList.gob")
+
+	if _, err := os.Stat(path.Join(outputDirectory, "cache")); os.IsNotExist(err) {
+		if err := os.MkdirAll(outputDirectory, 0755); err != nil {
+			return nil, nil, nil, fmt.Errorf("error creating directory: %v", err)
+		}
+	}
+
 	diffed := make(MxFileListMeta)
 	diffedPathBased := MxCacheDiffWrapper{
 		Status: "vaild",
@@ -59,8 +67,9 @@ func ExporApptMeta(inputDirectory string, outputDirectory string, documents []sh
 
 	if _, err := os.Stat(fullOutputPath); os.IsNotExist(err) {
 		return func(data MxFileListMeta) error {
-			err = commitCache(data, outputDirectory, "MetaFileList.yaml")
-			err = commitCacheDiff(diffedPathBased, outputDirectory)
+			err = saveCache(outputDirectory, "MetaFileList", data, debug)
+			err = saveCacheDiff(outputDirectory, diffedPathBased, debug)
+
 			if err != nil {
 				return fmt.Errorf("error comitting cache: %v", err)
 			}
@@ -81,17 +90,18 @@ func ExporApptMeta(inputDirectory string, outputDirectory string, documents []sh
 	return func(data MxFileListMeta) error {
 		diffedPathBased := make(MxCacheDiffMap)
 
-		err = commitCache(data, outputDirectory, "MetaFileList.yaml")
+		err = saveCache(outputDirectory, "MetaFileList", data, debug)
 
 		for key, item := range diffed {
 			if item.Path != "" {
 				diffedPathBased[item.Path] = MxCacheDiff{ID: key, DiffType: item.DiffType, Hash: item.Hash}
 			}
 		}
-		err = commitCacheDiff(MxCacheDiffWrapper{
+
+		err = saveCacheDiff(outputDirectory, MxCacheDiffWrapper{
 			Status: "valid",
 			Data:   diffedPathBased,
-		}, outputDirectory)
+		}, debug)
 
 		if err != nil {
 			return fmt.Errorf("error comitting cache: %v", err)
@@ -171,59 +181,121 @@ func cacheDiff(MPRFilePath string, outputPath string) (MxFileListMeta, error) {
 	return cachedApp, nil
 }
 
-func commitCache(metaList any, outputDirectory string, fileName string) error {
+func commitCacheYAML(metaList any, outputDirectory string) error {
 	// write metadata to file
 	metadataYAML, err := yaml.Marshal(metaList)
 	if err != nil {
 		return fmt.Errorf("error marshaling metadata: %v", err)
 	}
 
-	if _, err := os.Stat(path.Join(outputDirectory, "cache")); os.IsNotExist(err) {
-		if err := os.MkdirAll(outputDirectory, 0755); err != nil {
-			return fmt.Errorf("error creating directory: %v", err)
-		}
-	}
-
-	metadataFileName := filepath.Join(outputDirectory, "cache", fileName)
-
-	if err := os.WriteFile(metadataFileName, metadataYAML, 0644); err != nil {
+	if err := os.WriteFile(outputDirectory, metadataYAML, 0644); err != nil {
 		return fmt.Errorf("error writing metadata file: %v", err)
 	}
 
 	return nil
 }
 
-func commitCacheDiff(diffMap MxCacheDiffWrapper, outputDirectory string) error {
-	fullPath := filepath.Join(outputDirectory, "cache", "diff.yaml")
-	var metadataYAML []byte
-	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-		metadataYAML, err = yaml.Marshal(diffMap)
+func saveCache(outputDirectory string, filename string, cache MxFileListMeta, debug bool) error {
+	fullPath := path.Join(outputDirectory, "cache", filename+".gob")
+
+	file, err := os.Create(fullPath)
+
+	if err != nil {
+		return err
+	}
+
+	if debug {
+		err = commitCacheYAML(cache, path.Join(outputDirectory, "cache", filename+".yaml"))
 		if err != nil {
-			return fmt.Errorf("error marshaling metadata: %v", err)
-		}
-	} else {
-		prevCahceFile, err := os.ReadFile(fullPath)
-
-		if err != nil {
-			return fmt.Errorf("error reading old cache: %v", err)
-		}
-
-		prevCache := MxCacheDiffWrapper{}
-		yaml.Unmarshal(prevCahceFile, &prevCache)
-
-		if len(diffMap.Data) > 0 {
-			for key := range diffMap.Data {
-				prevCache.Data[key] = diffMap.Data[key]
-			}
-		}
-
-		metadataYAML, err = yaml.Marshal(prevCache)
-		if err != nil {
-			return fmt.Errorf("error marshaling metadata: %v", err)
+			return err
 		}
 	}
 
-	writeCacheDiff(outputDirectory, metadataYAML)
+	defer file.Close()
+
+	encoder := gob.NewEncoder(file)
+	err = encoder.Encode(cache)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func loadCache[T any](filePath string, makeFunc func() T) (T, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return makeFunc(), nil
+		}
+		return makeFunc(), err
+	}
+
+	defer file.Close()
+
+	cache := makeFunc()
+
+	decoder := gob.NewDecoder(file)
+	err = decoder.Decode(&cache)
+
+	if err != nil {
+
+		return makeFunc(), err
+	}
+
+	return cache, nil
+}
+
+func makeDiff() MxCacheDiffWrapper {
+	return MxCacheDiffWrapper{Status: "vaild", Data: nil}
+}
+
+func saveCacheDiff(outputDirectory string, cache MxCacheDiffWrapper, debug bool) error {
+	gobPath := path.Join(outputDirectory, "cache", "diff.gob")
+	yamlPath := path.Join(outputDirectory, "cache", "diff.yaml")
+	prevCache, err := loadCache(gobPath, makeDiff)
+	fmt.Println("here", prevCache, cache, err)
+
+	if err != nil {
+		return err
+	}
+
+	file, err := os.Create(gobPath)
+	if err != nil {
+		return err
+	}
+
+	// merge old and new caches
+	if len(prevCache.Data) == 0 && len(cache.Data) != 0 {
+		prevCache.Data = cache.Data
+	} else if len(cache.Data) > 0 {
+		for key := range cache.Data {
+			prevCache.Data[key] = cache.Data[key]
+		}
+	}
+
+	// write gob file
+	encoder := gob.NewEncoder(file)
+	err = encoder.Encode(prevCache)
+	defer file.Close()
+
+	if err != nil {
+		return err
+	}
+
+	if debug {
+		yaml, err := yaml.Marshal(prevCache)
+
+		if err != nil {
+			return err
+		}
+
+		if err := os.WriteFile(yamlPath, yaml, 0644); err != nil {
+			return fmt.Errorf("error writing metadata file: %v", err)
+		}
+
+	}
 
 	return nil
 }
@@ -245,24 +317,23 @@ func GetDiffCache(outputDirectory string) (MxCacheDiffWrapper, error) {
 }
 
 // Just write an empty object as i dont want to handle file removeal and recreations
-func InvalidateCahce(outputDirectory string, full bool) error {
+func InvalidateCahce(outputDirectory string, full bool, debug bool) error {
 	var status string
 	if full {
 		status = "invalid"
 	} else {
 		status = "valid"
 	}
+
 	empty := MxCacheDiffWrapper{
 		Status: status,
 	}
 
-	yaml, err := yaml.Marshal(empty)
+	err := saveCacheDiff(outputDirectory, empty, debug)
 
 	if err != nil {
-		return fmt.Errorf("error marshaling data: %v", err)
+		return fmt.Errorf("error invalidating cache: %v", err)
 	}
-
-	writeCacheDiff(outputDirectory, yaml)
 
 	return nil
 }
@@ -281,19 +352,4 @@ func GetCache(path string) (MxFileListMeta, error) {
 		return nil, fmt.Errorf("error Parsing cache file : %v", err)
 	}
 	return cachedApp, nil
-}
-
-func writeCacheDiff(outputDirectory string, YAML []byte) error {
-	fullPath := filepath.Join(outputDirectory, "cache", "diff.yaml")
-	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-		if err := os.MkdirAll(path.Join(outputDirectory, "cache"), 0755); err != nil {
-			return fmt.Errorf("error creating directory: %v", err)
-		}
-	}
-
-	if err := os.WriteFile(fullPath, YAML, 0644); err != nil {
-		return fmt.Errorf("error writing metadata file: %v", err)
-	}
-
-	return nil
 }

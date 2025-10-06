@@ -154,7 +154,7 @@ func getMxUnitsV2(MPRFilePath string) ([]MxUnit, error) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query("SELECT UnitID, ContainerID, ContainmentName FROM Unit")
+	rows, err := db.Query("SELECT UnitID, ContainerID, ContentsHash, ContainmentName FROM Unit")
 	if err != nil {
 		return nil, fmt.Errorf("error querying units: %v", err)
 	}
@@ -165,7 +165,9 @@ func getMxUnitsV2(MPRFilePath string) ([]MxUnit, error) {
 	for rows.Next() {
 		var containmentName string
 		var unitID, containerID []byte
-		if err := rows.Scan(&unitID, &containerID, &containmentName); err != nil {
+		var contentsHash string
+
+		if err := rows.Scan(&unitID, &containerID, &contentsHash, &containmentName); err != nil {
 			return nil, fmt.Errorf("error scanning unit: %v", err)
 		}
 
@@ -173,6 +175,7 @@ func getMxUnitsV2(MPRFilePath string) ([]MxUnit, error) {
 			UnitID:          base64.StdEncoding.EncodeToString(unitID),
 			ContainerID:     base64.StdEncoding.EncodeToString(containerID),
 			ContainmentName: containmentName,
+			Hash:            contentsHash,
 		}
 		log.Debugf("unit: %+v", unit)
 

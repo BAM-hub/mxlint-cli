@@ -224,7 +224,7 @@ func EvalAll(rulesPath string, modelSourcePath string, xunitReport string, jsonF
 			}
 
 		}
-		cache.InvalidateCahce(modelSourcePath, false)
+		cache.InvalidateCahce(modelSourcePath, false, false)
 		newFile, err := os.Create(jsonFile)
 
 		if err != nil {
