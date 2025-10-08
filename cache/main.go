@@ -50,7 +50,7 @@ func ExporApptMeta(inputDirectory string, outputDirectory string, documents []sh
 	var fullOutputPath = filepath.Join(outputDirectory, "cache", "MetaFileList.gob")
 
 	if _, err := os.Stat(path.Join(outputDirectory, "cache")); os.IsNotExist(err) {
-		if err := os.MkdirAll(outputDirectory, 0755); err != nil {
+		if err := os.MkdirAll(path.Join(outputDirectory, "cache"), 0755); err != nil {
 			return nil, nil, nil, fmt.Errorf("error creating directory: %v", err)
 		}
 	}
@@ -252,12 +252,14 @@ func makeDiff() MxCacheDiffWrapper {
 }
 
 func saveCacheDiff(outputDirectory string, cache MxCacheDiffWrapper, debug bool) error {
-	gobPath := path.Join(outputDirectory, "cache", "diff.gob")
-	yamlPath := path.Join(outputDirectory, "cache", "diff.yaml")
+	gobPath := filepath.Join(outputDirectory, "cache", "diff.gob")
+	yamlPath := filepath.Join(outputDirectory, "cache", "diff.yaml")
 	prevCache, err := loadCache(gobPath, makeDiff)
-	fmt.Println("here", prevCache, cache, err)
+	fmt.Println("here",
+		path.Clean(gobPath), err)
 
 	if err != nil {
+		fmt.Println("error here")
 		return err
 	}
 
@@ -301,18 +303,12 @@ func saveCacheDiff(outputDirectory string, cache MxCacheDiffWrapper, debug bool)
 }
 
 func GetDiffCache(outputDirectory string) (MxCacheDiffWrapper, error) {
-	data, err := os.ReadFile(path.Join(outputDirectory, "cache", "diff.yaml"))
-	var cacheMap = MxCacheDiffWrapper{}
+
+	cacheMap, err := loadCache(path.Join(outputDirectory, "cache", "diff.gob"), makeDiff)
 
 	if err != nil {
-		return cacheMap, fmt.Errorf("can't read file")
+		return cacheMap, fmt.Errorf("faild to read cache diff %v", err)
 	}
-
-	err = yaml.Unmarshal(data, &cacheMap)
-	if err != nil {
-		return cacheMap, fmt.Errorf("error parsing the file")
-	}
-
 	return cacheMap, nil
 }
 
@@ -329,10 +325,36 @@ func InvalidateCahce(outputDirectory string, full bool, debug bool) error {
 		Status: status,
 	}
 
-	err := saveCacheDiff(outputDirectory, empty, debug)
+	gobPath := filepath.Join(outputDirectory, "cache", "diff.gob")
+	yamlPath := filepath.Join(outputDirectory, "cache", "diff.yaml")
+
+	file, err := os.Create(gobPath)
 
 	if err != nil {
-		return fmt.Errorf("error invalidating cache: %v", err)
+		return err
+	}
+
+	// write gob file
+	encoder := gob.NewEncoder(file)
+	err = encoder.Encode(empty)
+
+	defer file.Close()
+
+	if err != nil {
+		return err
+	}
+
+	if debug {
+		yaml, err := yaml.Marshal(empty)
+
+		if err != nil {
+			return err
+		}
+
+		if err := os.WriteFile(yamlPath, yaml, 0644); err != nil {
+			return fmt.Errorf("error writing metadata file: %v", err)
+		}
+
 	}
 
 	return nil
