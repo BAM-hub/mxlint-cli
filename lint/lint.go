@@ -172,7 +172,6 @@ func EvalAll(rulesPath string, modelSourcePath string, xunitReport string, jsonF
 
 		for index, testsuite := range testsuites {
 			// if the new data has tests this meas this was diffed in cache
-
 			if testsuite.Tests > 0 {
 				for _, testCase := range testsuite.Testcases {
 					testCaseIndex := findTestCase(jsonData.Testsuites[index].Testcases, testCase.Name)
